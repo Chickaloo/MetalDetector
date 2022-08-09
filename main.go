@@ -1,6 +1,7 @@
 package main
 
 import (
+  "flag"
 	"fmt"
   "os"
 	//"net/http"
@@ -21,6 +22,11 @@ var matchDataByAlly = make(map[string]map[string]*MatchData)
 // Map of Player Name to WinData
 var winDataByAlly = make(map[string]*WinData)
 
+var requestedSummoner = flag.String("s", "Chickaloo", "Name of the summoner to look up.")
+var gamesPlayed = flag.Int("n", 1, "Number of games played")
+var apiKey = flag.String("a", "RGAPI-7ee91f55-688e-4162-b9bb-66d4a4094b8c", "API Key, from developer.riotgames.com")
+var threshold = flag.Int("t", 1, "Minimum number of games together to count as a duo")
+
 type MatchData struct {
 
 }
@@ -36,34 +42,31 @@ func (w *WinData) Ratio() float64 {
 }
 
 func main() {
-	client := golio.NewClient(API_KEY,
+  flag.Parse()
+
+	client := golio.NewClient(*apiKey,
                 golio.WithRegion(api.RegionNorthAmerica),
                 golio.WithLogger(logrus.New().WithField("foo", "bar")))
-	summoner, _ := client.Riot.Summoner.GetByName("Chickaloo")
+	summoner, _ := client.Riot.Summoner.GetByName(*requestedSummoner)
 	fmt.Printf("%s is a level %d summoner\n", summoner.Name, summoner.SummonerLevel)
 
   RANKED_SOLO_5x5 := int(420)
-  GAMES_PLAYED := 561
-  for i := 0; i < 6; i++ {
-    startIndex := i * RIOT_MAX_MATCHES_RETURNED
-    endIndex := ((1+i)*RIOT_MAX_MATCHES_RETURNED)-1
-    fmt.Printf("Retrieving matches %d to %d\n", startIndex, endIndex)
-
-
+  GAMES_PLAYED := *gamesPlayed
+  gamesRecorded := 0
+  for GAMES_PLAYED != 0 {
     gamesToRequest := 100
     if GAMES_PLAYED < 100 {
       gamesToRequest = GAMES_PLAYED
     }
+    fmt.Printf("Requesting %d games, starting from %d\n", gamesToRequest, gamesRecorded)
 
-    fmt.Printf("Requesting %d games, starting from %d", gamesToRequest, startIndex)
-
-    matchIds, matchListErr := client.Riot.Match.List(summoner.PUUID, startIndex, gamesToRequest, &lol.MatchListOptions{Queue:&RANKED_SOLO_5x5})
+    matchIds, matchListErr := client.Riot.Match.List(summoner.PUUID, gamesRecorded, gamesToRequest, &lol.MatchListOptions{Queue:&RANKED_SOLO_5x5})
     if matchListErr != nil {
       fmt.Println(matchListErr.Error())
       os.Exit(1)
     }
 
-    for matchIndex := 0; matchIndex < RIOT_MAX_MATCHES_RETURNED; matchIndex ++ {
+    for matchIndex := 0; matchIndex < len(matchIds); matchIndex ++ {
       matchId := matchIds[matchIndex]
 
       matchData, _ := client.Riot.Match.Get(matchId)
@@ -102,6 +105,7 @@ func main() {
     }
 
     GAMES_PLAYED -= gamesToRequest
+    gamesRecorded += gamesToRequest
     // END MATCH PROCESSING
   }
 
@@ -128,7 +132,7 @@ func main() {
         }
       }
     }
-    if bestData.Total > 3 {
+    if bestData.Total >= *threshold {
       fmt.Printf("Summoner: %s - W/L: %d - %d Ratio: %f\n", bestSummoner, bestData.Wins, bestData.Losses, bestData.Ratio())
     }
     delete(winDataByAlly, bestSummoner)
